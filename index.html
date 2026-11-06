@@ -1838,9 +1838,9 @@ CV.SCHEMA = (function () {
       values: ['Route', 'VTT', 'Gravel', 'Vélo à assistance électrique', 'Randonneuse', 'Tandem', 'Autre'] },
     { key: 'qualifs', h: 'Qualifications d’encadrement', name: 'Liste_Qualifs',
       values: ['Aucune', 'Animateur club', 'Initiateur', 'Moniteur', 'Instructeur'] },
-    { key: 'typesAdhesion', h: 'Types d’adhésion', name: 'Liste_TypesAdhesion',
+    { key: 'typesAdhesion', h: 'Types d’adhésion', name: 'Liste_TypesAdhesion', locked: true,
       values: ['Licence FFVélo et adhésion au club', 'Adhésion au club seule (licencié ailleurs)',
-        'Membre d’honneur (gratuit)'] },
+        'Adhésion au club sans licence', 'Membre d’honneur (gratuit)'] },
     { key: 'formules', h: 'Formules d’assurance', name: 'Liste_Formules',
       values: ['Mini-braquet', 'Petit-braquet', 'Grand-braquet', 'Sans objet'] },
     { key: 'categoriesTarif', h: 'Catégories de tarif', name: 'Liste_CategoriesTarif',
@@ -2148,7 +2148,7 @@ CV.SCHEMA = (function () {
           f: 'IF([@[N° adhérent]]="","",IFERROR(INDEX(T_Adherents[Nom],MATCH([@[N° adhérent]],T_Adherents[N° adhérent],0))&" "&INDEX(T_Adherents[Prénom],MATCH([@[N° adhérent]],T_Adherents[N° adhérent],0)),"⚠ numéro inconnu"))',
           help: 'Calculé automatiquement à partir du numéro d’adhérent. « ⚠ numéro inconnu » signale une erreur de numéro.' }),
         F('type', 'Type d’adhésion', 'enum', { w: 24, list: 'typesAdhesion', def: 'Licence FFVélo et adhésion au club', req: true,
-          help: 'Avec licence FFVélo (cas habituel), adhésion au club seule (personne déjà licenciée dans un autre club ou une autre fédération), ou membre d’honneur.' }),
+          help: 'Avec licence FFVélo (cas habituel) ; adhésion au club seule (personne déjà licenciée dans un autre club ou une autre fédération) ; adhésion au club sans licence (la personne n’a aucune licence : elle n’a pas l’assurance de la FFVélo) ; ou membre d’honneur.' }),
         F('tarif', 'Tarif appliqué', 'enum', { w: 26, list: 'tarifs:libelle',
           help: 'Choisissez le tarif dans la liste (elle vient de la feuille « Tarifs »). Les montants se remplissent alors tout seuls dans l’application.' }),
         F('formule', 'Formule d’assurance', 'enum', { w: 14, list: 'formules',
@@ -2813,7 +2813,7 @@ CV.SCHEMA = (function () {
     ['Adulte', 'Mini-braquet', 55, 'Montant FFVélo 2026 (30,50 € de licence + 24,50 € d’assurance), à vérifier pour la nouvelle saison.'],
     ['Adulte', 'Petit-braquet', 57, 'Montant FFVélo 2026 (30,50 € de licence + 26,50 € d’assurance), à vérifier pour la nouvelle saison.'],
     ['Adulte', 'Grand-braquet', 107, 'Montant FFVélo 2026 (30,50 € de licence + 76,50 € d’assurance), à vérifier pour la nouvelle saison.'],
-    ['Sans licence', 'Sans objet', 0, 'Pour une personne déjà licenciée dans un autre club : seule la part club est due.'],
+    ['Sans licence', 'Sans objet', 0, 'Pour une personne licenciée dans un autre club, ou qui adhère au club sans licence : seule la part club est due.'],
     ['Membre d’honneur', 'Sans objet', 0, 'Gratuit.']
   ];
 
@@ -6753,6 +6753,24 @@ var CV = (typeof window !== 'undefined' ? window : globalThis).CV ||
     return U.round2((+a.partLicence || 0) + (+a.partClub || 0));
   };
   C.reste = function (a) { var t = C.total(a); return t === null ? null : U.round2(t - (+a.montantPaye || 0)); };
+  /* Types d'adhésion : libellés de la liste verrouillée « Types d'adhésion » */
+  C.TYPE_LICENCE = 'Licence FFVélo et adhésion au club';
+  C.TYPE_AILLEURS = 'Adhésion au club seule (licencié ailleurs)';
+  C.TYPE_SANS_LICENCE = 'Adhésion au club sans licence';
+  C.TYPE_HONNEUR = 'Membre d’honneur (gratuit)';
+  /** Vrai si le club doit enregistrer une licence FFVélo pour cette cotisation (cas habituel, et type vide). */
+  C.licenceParLeClub = function (a) {
+    var t = a && a.type;
+    return t !== C.TYPE_AILLEURS && t !== C.TYPE_SANS_LICENCE && t !== C.TYPE_HONNEUR;
+  };
+  /** Situation de licence en clair pour les cotisations sans licence prise par le club, sinon null. */
+  C.situationLicence = function (a) {
+    var t = a && a.type;
+    if (t === C.TYPE_AILLEURS) return 'Licencié ailleurs';
+    if (t === C.TYPE_SANS_LICENCE) return 'Sans licence';
+    if (t === C.TYPE_HONNEUR) return 'Membre d’honneur';
+    return null;
+  };
   C.paye = function (a) {
     var t = C.total(a);
     if (!a.adherent || t === null) return null;
@@ -7022,7 +7040,7 @@ var CV = (typeof window !== 'undefined' ? window : globalThis).CV ||
       // Cotisations
       var unpaid = C.adhesionsBySeason(season).filter(function (a) { return C.paye(a) === false; });
       if (unpaid.length) add('attention', U.count(unpaid.length, 'cotisation') + ' de ' + season + ' pas encore réglée' + (unpaid.length > 1 ? 's' : ''), 'Total restant : ' + U.fmtMoney(U.sum(unpaid, C.reste)), '#/cotisations?filtre=impayes', 'cotisations');
-      var nonSaisies = C.adhesionsBySeason(season).filter(function (a) { return C.paye(a) && a.licenceSaisie !== true && a.type !== 'Adhésion au club seule (licencié ailleurs)' && a.type !== 'Membre d’honneur (gratuit)'; });
+      var nonSaisies = C.adhesionsBySeason(season).filter(function (a) { return C.paye(a) && a.licenceSaisie !== true && C.licenceParLeClub(a); });
       if (nonSaisies.length) add('urgent', U.count(nonSaisies.length, 'licence') + ' payée' + (nonSaisies.length > 1 ? 's' : '') + ' mais pas encore enregistrée' + (nonSaisies.length > 1 ? 's' : '') + ' à la FFVélo', 'Tant que la licence n’est pas enregistrée sur l’espace fédéral, l’adhérent n’est pas assuré.', '#/cotisations?filtre=licences', 'attention');
       if (U.month(today) >= 9 || U.month(today) <= 2) {
         var prev = U.month(today) >= 9 ? season : season - 1;
@@ -8903,12 +8921,12 @@ var CV = window.CV || (window.CV = {});
 
   /** Étiquette « licence enregistrée » d'une cotisation */
   function licenceEtiquette(x) {
-    if (x.type === 'Adhésion au club seule (licencié ailleurs)') return ui.etiquette('Licencié ailleurs', 'neutre');
-    if (x.type === 'Membre d’honneur (gratuit)') return ui.etiquette('Sans licence', 'neutre');
+    if (x.type === C.TYPE_AILLEURS) return ui.etiquette('Licencié ailleurs', 'neutre');
+    if (x.type === C.TYPE_SANS_LICENCE || x.type === C.TYPE_HONNEUR) return ui.etiquette('Sans licence', 'neutre');
     return x.licenceSaisie ? ui.etiquette('Enregistrée', 'ok') : ui.etiquette('À enregistrer', 'attention');
   }
   function licenceAFaire(x) {
-    return C.paye(x) && x.licenceSaisie !== true && x.type !== 'Adhésion au club seule (licencié ailleurs)' && x.type !== 'Membre d’honneur (gratuit)';
+    return C.paye(x) && x.licenceSaisie !== true && C.licenceParLeClub(x);
   }
 
   function cotisationsTab(a) {
@@ -9129,7 +9147,8 @@ var CV = window.CV || (window.CV = {});
         ${caseDoc(prev && prev.formule === 'Petit-braquet')} <strong>Petit-braquet</strong> : ajoute les accidents corporels<br>
         ${caseDoc(prev && prev.formule === 'Grand-braquet')} <strong>Grand-braquet</strong> : ajoute les dégâts au vélo et à l’équipement<br>
         ${caseDoc(prev && prev.cyclosportives === true)} Option « cyclosportives »<br>
-        ${caseDoc(prev && prev.type === 'Adhésion au club seule (licencié ailleurs)')} Adhésion au club seule, déjà licencié(e) dans le club : ${H`<span style="display:inline-block;width:200px;border-bottom:1px dotted #000"></span>`}</p>
+        ${caseDoc(prev && prev.type === C.TYPE_AILLEURS)} Adhésion au club seule, déjà licencié(e) dans le club : ${H`<span style="display:inline-block;width:200px;border-bottom:1px dotted #000"></span>`}<br>
+        ${caseDoc(prev && prev.type === C.TYPE_SANS_LICENCE)} Adhésion au club sans licence : je sais que je n’ai pas l’assurance de la licence FFVélo</p>
       ${tarifs.length ? H`<h2>Tarifs ${tarifs[0].saison}</h2>${CV.print.table(['Tarif', 'Licence et assurance', 'Part club', 'Total'], tarifs.map(function (t) {
         return [t.libelle, U.fmtMoney(t.partLicence), U.fmtMoney(t.partClub), U.fmtMoney((+t.partLicence || 0) + (+t.partClub || 0))];
       }), { num: [false, true, true, true] })}` : ''}
@@ -9332,6 +9351,7 @@ var CV = window.CV || (window.CV = {});
       onMount: function (el, form) {
         // tarifs de la saison choisie
         var sel = form.querySelector('[name=tarif]');
+        var typeSel = form.querySelector('[name=type]');
         function fillTarifs() {
           var s = +form.querySelector('[name=saison]').value;
           var list = ST.all('tarifs').filter(function (t) { return t.saison === s; });
@@ -9361,8 +9381,32 @@ var CV = window.CV || (window.CV = {});
           form.querySelector('[name=partLicence]').value = t.partLicence === null ? '' : U.fmtNum(t.partLicence, 2).replace(/\s/g, '');
           form.querySelector('[name=partClub]').value = t.partClub === null ? '' : U.fmtNum(t.partClub, 2).replace(/\s/g, '');
           if (t.formule) form.querySelector('[name=formule]').value = t.formule;
-          if (t.categorie === 'Membre d’honneur') form.querySelector('[name=type]').value = 'Membre d’honneur (gratuit)';
-          else if (t.categorie === 'Sans licence') form.querySelector('[name=type]').value = 'Adhésion au club seule (licencié ailleurs)';
+          if (t.categorie === 'Membre d’honneur') typeSel.value = C.TYPE_HONNEUR;
+          else if (t.categorie === 'Sans licence' && typeSel.value !== C.TYPE_SANS_LICENCE) typeSel.value = C.TYPE_AILLEURS;
+          majTypeAide();
+          refreshTotal();
+        });
+        // type d'adhésion sans licence prise par le club : tarif correspondant et rappel sur l'assurance
+        var typeAide = document.createElement('div');
+        typeAide.className = 'aide';
+        typeSel.parentNode.appendChild(typeAide);
+        function majTypeAide() {
+          typeAide.textContent = typeSel.value === C.TYPE_SANS_LICENCE
+            ? 'Sans licence FFVélo, cet adhérent n’a pas l’assurance de la fédération pendant les sorties. Conseillez-lui de vérifier sa propre assurance (responsabilité civile et accidents).'
+            : typeSel.value === C.TYPE_AILLEURS ? 'Notez dans les remarques le club ou la fédération où il est licencié.' : '';
+        }
+        majTypeAide();
+        typeSel.addEventListener('change', function () {
+          majTypeAide();
+          if (C.licenceParLeClub({ type: typeSel.value })) return;
+          var s = +form.querySelector('[name=saison]').value;
+          var cat = typeSel.value === C.TYPE_HONNEUR ? 'Membre d’honneur' : 'Sans licence';
+          var cur = ST.all('tarifs').filter(function (x) { return x.saison === s && x.libelle === sel.value; })[0];
+          if (cur && cur.categorie === cat) return;
+          var t = ST.all('tarifs').filter(function (x) { return x.saison === s && x.categorie === cat; })[0];
+          if (t) { sel.value = t.libelle; sel.dispatchEvent(new Event('change', { bubbles: true })); return; }
+          form.querySelector('[name=formule]').value = 'Sans objet';
+          form.querySelector('[name=partLicence]').value = '0';
           refreshTotal();
         });
         // total et bouton « tout payé »
@@ -12890,7 +12934,7 @@ var CV = window.CV || (window.CV = {});
         ageCats: countBy(membres, function (a) { return C.ageCat(U.age(a.dateNaissance, fin)); }),
         communes: countBy(membres, function (a) { return a.commune ? U.capName(a.commune) : null; }),
         groupes: countBy(membres, function (a) { return a.groupe; }), velos: countBy(membres, function (a) { return a.velo; }),
-        formules: countBy(C.adhesionsBySeason(season).filter(function (x) { return C.paye(x); }), function (x) { return x.formule || x.type; }),
+        formules: countBy(C.adhesionsBySeason(season).filter(function (x) { return C.paye(x); }), function (x) { return C.situationLicence(x) || x.formule || 'Formule non précisée'; }),
         sorties: sorties, real: real, annul: annul, parMois: parMois, participations: participations, km: km, circuits: circuits,
         plusLongue: plusLongue, plusSuivie: plusSuivie, randos: randos, sejours: sejours, invites: invites, incidents: incidents, articles: articles,
         heures: U.sum(benev, function (b) { return +b.heures || 0; }), classement: C.classement(season)
